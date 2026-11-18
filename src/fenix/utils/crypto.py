@@ -1,6 +1,7 @@
 """Firma de apoyo y verificación a completar por el integrante 3."""
 import hashlib  # Selecciona SHA-256 para autenticar el contenido.
 import hmac  # Usa una comparación segura para las firmas.
+import re  # Valida el formato estricto de la marca de tiempo y del hexadecimal.
 import time  # Comprueba la ventana temporal.
 from fenix.utils.errors import ValidationError  # Rechazo de autenticación público.
 
@@ -45,4 +46,29 @@ def verify(secret: str, header: str, body: bytes, now: int | None = None) -> Non
     # Usar abs((int(time.time()) if now is None else now) - timestamp) <= 300.
     # Calcular signature y comparar con hmac.compare_digest; no usar ==.
     # Convertir fallos de parseo en ValidationError sin mostrar header ni secreto.
-    raise NotImplementedError("I3-A: verificar HMAC y fecha")
+    if not isinstance(header, str):
+        raise ValidationError("Cabecera de firma inválida.")
+    parts = header.split(",")
+    if len(parts) != 2:
+        raise ValidationError("Cabecera de firma inválida.")
+    fields: dict[str, str] = {}
+    for part in parts:
+        key, separator, value = part.partition("=")
+        if not separator or key in fields:
+            raise ValidationError("Cabecera de firma inválida.")
+        fields[key] = value
+    if set(fields) != {"t", "v1"}:
+        raise ValidationError("Cabecera de firma inválida.")
+    timestamp_text = fields["t"]
+    received = fields["v1"]
+    if re.fullmatch(r"[0-9]+", timestamp_text) is None:
+        raise ValidationError("Marca de tiempo de firma inválida.")
+    if re.fullmatch(r"[0-9a-fA-F]{64}", received) is None:
+        raise ValidationError("Firma con formato inválido.")
+    timestamp = int(timestamp_text)
+    current = int(time.time()) if now is None else now
+    if abs(current - timestamp) > 300:
+        raise ValidationError("Firma fuera de la ventana de 300 segundos.")
+    expected = signature(secret, timestamp, body)
+    if not hmac.compare_digest(expected, received.lower()):
+        raise ValidationError("Firma incorrecta.")
