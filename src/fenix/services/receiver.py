@@ -40,4 +40,39 @@ async def webhook(request: Request) -> dict:
     # Obtener queue_url(os.environ["QUEUE_PREFIX"]) y llamar publish.
     # ClientError/BotoCoreError -> 503, sin prometer aceptación ni mostrar secretos.
     # Retornar accepted/event_id/message_id únicamente después de send_message exitoso.
-    raise NotImplementedError("I3-B: completar receptor HTTP")
+    secret = os.environ.get("WEBHOOK_SECRET", "")
+    if not secret:
+        raise HTTPException(503, "Servicio no configurado")  # No se autentica a ciegas.
+    try:
+        verify(secret, request.headers.get("X-Webhook-Signature"), raw)
+    except ValidationError as error:
+        raise HTTPException(401, "Firma inválida") from error  # Sin eco del header.
+    try:
+        event = json.loads(raw)  # Los bytes firmados son los mismos que se parsean.
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        raise HTTPException(400, "JSON inválido") from error
+    if not isinstance(event, dict):
+        raise HTTPException(400, "El evento debe ser un objeto JSON")
+    try:
+        inventory = await run_in_threadpool(load, "data/inventory.json")
+    except (OSError, json.JSONDecodeError) as error:
+        raise HTTPException(503, "Inventario no disponible") from error
+    if not inventory:
+        raise HTTPException(503, "Servicio no listo: falta el inventario")
+    try:
+        validated = validate(event, inventory)
+    except ValidationError as error:
+        raise HTTPException(422, "Contrato del evento inválido") from error
+    prefix = os.environ.get("QUEUE_PREFIX", "")
+    if not prefix:
+        raise HTTPException(503, "Servicio no configurado")
+    try:
+        url = await run_in_threadpool(queue_url, prefix)
+    except (ClientError, BotoCoreError) as error:
+        raise HTTPException(503, "Cola no disponible") from error
+    try:
+        message_id = await run_in_threadpool(publish, url, validated)
+    except (ClientError, BotoCoreError) as error:
+        raise HTTPException(503, "No se pudo publicar el evento") from error
+    return {"status": "accepted", "event_id": validated["event_id"],
+            "message_id": message_id}  # Solo hay aceptación si SQS confirmó.
