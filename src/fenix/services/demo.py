@@ -1,9 +1,10 @@
 """Laboratorio acotado de recursos. Integrante 2 prepara, integrante 6 verifica."""
+import time  # Acota las consultas de verificación del fallo simulado.
 from botocore.exceptions import ClientError
 from fenix.config.settings import client
 from fenix.services.cloud_support import (aws_tags, create_bucket, create_group,
                                           create_instance, mock_inputs)
-from fenix.utils.errors import PermanentError, RetryableError
+from fenix.utils.errors import PermanentError, RetryableError, ValidationError
 from fenix.utils.state import load, save
 from fenix.utils.validation import identifier
 
@@ -192,4 +193,83 @@ def inject_fault(alias: str) -> None:
     # node-01: stop_instances y comprobar stopped, con consultas limitadas.
     # bucket-01: quitar Owner conservando el resto de etiquetas.
     # Esta función fabrica el problema; no debe enviar el evento automáticamente.
-    raise NotImplementedError("I6-A: inyectar y comprobar fallo")
+    inventory = load("data/inventory.json")
+    if not isinstance(inventory, dict):
+        raise PermanentError("El inventario existente no es un objeto JSON.")
+    record = inventory.get(alias)  # Solo se acepta lo inventariado por el grupo.
+    if not isinstance(record, dict):
+        raise ValidationError("El alias no pertenece al inventario del grupo.")
+    resource_type = record.get("type")
+    resource_id = record.get("id")
+    if not isinstance(resource_id, str) or not resource_id:
+        raise PermanentError("El recurso inventariado no tiene un ID utilizable.")
+
+    if alias == "node-01":  # Detener es la falla que el worker debe reparar.
+        if resource_type != "ec2":
+            raise PermanentError("node-01 no es una instancia en el inventario.")
+        ec2 = client("ec2")
+        try:
+            ec2.stop_instances(InstanceIds=[resource_id])
+        except ClientError as error:
+            if error.response.get("Error", {}).get("Code") == "InvalidInstanceID.NotFound":
+                raise PermanentError("La instancia inventariada no existe.") from error
+            raise RetryableError("No se pudo detener la instancia.") from error
+        state = None
+        for attempt in range(10):  # Consultas acotadas: el mock suele cambiar rápido.
+            try:
+                described = ec2.describe_instances(InstanceIds=[resource_id])
+            except ClientError as error:
+                if error.response.get("Error", {}).get("Code") == "InvalidInstanceID.NotFound":
+                    raise PermanentError("La instancia inventariada no existe.") from error
+                raise RetryableError("No se pudo verificar la instancia.") from error
+            instances = [instance for reservation in described.get("Reservations", [])
+                         for instance in reservation.get("Instances", [])]
+            if not instances:  # Algunos emuladores responden vacío en vez de error.
+                raise PermanentError("La instancia inventariada no existe.")
+            state = instances[0].get("State", {}).get("Name")
+            if state == "stopped":
+                break
+            if state in ("terminated", "shutting-down"):
+                raise PermanentError(f"La instancia está en estado {state}.")
+            if attempt < 9:  # Última vuelta sin esperar; el límite ya está agotado.
+                time.sleep(0.5)
+        if state != "stopped":  # Se verifica por SDK, no se asume el cambio.
+            raise RetryableError("La instancia todavía no figura detenida.")
+        return
+
+    if alias == "bucket-01":  # Quitar Owner conserva las etiquetas ajenas a la política.
+        if resource_type != "s3":
+            raise PermanentError("bucket-01 no es un bucket en el inventario.")
+        s3 = client("s3")
+        try:
+            tag_set = s3.get_bucket_tagging(Bucket=resource_id)["TagSet"]
+        except ClientError as error:
+            code = error.response.get("Error", {}).get("Code")
+            if code in ("NoSuchBucket", "NoSuchBucketError", "404", "NotFound"):
+                raise PermanentError("El bucket inventariado no existe.") from error
+            if code == "NoSuchTagSet":
+                return  # Sin etiquetas no hay Owner: la falla ya está presente.
+            raise RetryableError("No se pudieron leer las etiquetas del bucket.") from error
+        current = {tag["Key"]: tag["Value"] for tag in tag_set}
+        if "Owner" not in current:
+            return  # Repetir la inyección no cambia el recurso.
+        remaining = {key: value for key, value in current.items() if key != "Owner"}
+        try:
+            if remaining:  # Put reemplaza el conjunto: se envía el resto intacto.
+                s3.put_bucket_tagging(Bucket=resource_id,
+                                      Tagging={"TagSet": aws_tags(remaining)})
+                verified = s3.get_bucket_tagging(Bucket=resource_id)["TagSet"]
+            else:  # S3 no acepta un TagSet vacío; se eliminan todas las etiquetas.
+                s3.delete_bucket_tagging(Bucket=resource_id)
+                verified = []
+        except ClientError as error:
+            if error.response.get("Error", {}).get("Code") == "NoSuchTagSet":
+                verified = []
+            else:
+                raise RetryableError("No se pudo quitar la etiqueta Owner.") from error
+        final = {tag["Key"]: tag["Value"] for tag in verified}
+        if "Owner" in final:  # El fallo simulado se comprueba leyendo el recurso.
+            raise RetryableError("La etiqueta Owner todavía figura en el bucket.")
+        return
+
+    raise PermanentError("El alias no corresponde a un recurso de prueba conocido.")
