@@ -1,5 +1,9 @@
 """Laboratorio acotado de recursos. Integrante 2 prepara, integrante 6 verifica."""
+from botocore.exceptions import ClientError
 from fenix.config.settings import client
+from fenix.services.cloud_support import (aws_tags, create_bucket, create_group,
+                                          create_instance, mock_inputs)
+from fenix.utils.errors import PermanentError, RetryableError
 from fenix.utils.state import load, save
 from fenix.utils.validation import identifier
 
@@ -28,7 +32,147 @@ def setup_demo(group: str) -> dict:
     # Crear/reusar bucket fenix-{group}-demo; región us-east-1 para este laboratorio.
     # Aplicar tags ManagedBy=ppa2, Project=fenix, GroupId=group y Owner=group.
     # Publicar inventario solo con recursos cuya propiedad haya sido verificada.
-    raise NotImplementedError("I2-C: crear laboratorio e inventario")
+    group = identifier(group)  # Un ID inválido no debe convertirse en nombre de recurso.
+    expected = {"ManagedBy": "ppa2", "Project": "fenix",
+                "GroupId": group, "Owner": group}
+    sg_name = f"fenix-{group}-sg"
+    instance_name = f"fenix-{group}-node-01"
+    bucket_name = f"fenix-{group}-bucket-01"
+    ec2, s3 = client("ec2"), client("s3")
+
+    # 1. SG exclusivo del grupo, recuperado por nombre y verificado por tags.
+    try:
+        security_groups = ec2.describe_security_groups(Filters=[
+            {"Name": "group-name", "Values": [sg_name]}])["SecurityGroups"]
+    except ClientError as error:
+        raise RetryableError("No se pudo consultar el SG del grupo.") from error
+    security_groups = [row for row in security_groups
+                       if row.get("GroupName") == sg_name]
+    if len(security_groups) > 1:
+        raise PermanentError("Hay más de un SG con el nombre del grupo.")
+    sg_id = None
+    if security_groups:
+        found_tags = {tag["Key"]: tag["Value"]
+                      for tag in security_groups[0].get("Tags", [])}
+        if any(found_tags.get(key) != value for key, value in expected.items()):
+            raise PermanentError("El SG existente no coincide con el inventario.")
+        sg_id = security_groups[0]["GroupId"]
+
+    # 2. Instancia mock, recuperada por tags Project=fenix y GroupId.
+    try:
+        reservations = ec2.describe_instances(Filters=[
+            {"Name": "tag:Project", "Values": ["fenix"]},
+            {"Name": "tag:GroupId", "Values": [group]},
+            {"Name": "instance-state-name",
+             "Values": ["pending", "running", "stopping", "stopped"]},
+        ])["Reservations"]
+    except ClientError as error:
+        raise RetryableError("No se pudo consultar la instancia del grupo.") from error
+    instances = []
+    for reservation in reservations:  # Se verifica también del lado del cliente.
+        for candidate in reservation.get("Instances", []):
+            candidate_tags = {tag["Key"]: tag["Value"]
+                              for tag in candidate.get("Tags", [])}
+            if (candidate_tags.get("Project") == "fenix"
+                    and candidate_tags.get("GroupId") == group
+                    and candidate.get("State", {}).get("Name")
+                    not in ("terminated", "shutting-down")):
+                instances.append(candidate)
+    if len(instances) > 1:
+        raise PermanentError("Hay más de una instancia para el grupo.")
+    instance_id = None
+    if instances:
+        instance = instances[0]
+        instance_tags = {tag["Key"]: tag["Value"]
+                         for tag in instance.get("Tags", [])}
+        if any(instance_tags.get(key) != value for key, value in expected.items()):
+            raise PermanentError("La instancia existente no coincide con el inventario.")
+        instance_id = instance["InstanceId"]
+        groups = instance.get("SecurityGroups") or []
+        instance_sg = groups[0].get("GroupId") if groups else None
+        if instance_sg and sg_id and instance_sg != sg_id:
+            raise PermanentError("La instancia no usa el SG exclusivo del grupo.")
+        sg_id = sg_id or instance_sg
+    if instance_id is not None and sg_id is None:
+        raise PermanentError("No se pudo determinar el SG de la instancia.")
+
+    # 3. Crear solo lo ausente; las recetas de apoyo hacen un paso API cada una.
+    vpc_id = image_id = None
+    if instance_id is None or sg_id is None:
+        vpc_id, image_id = mock_inputs()  # Falla claro si falta el entorno mock.
+    if sg_id is None:
+        sg_id = create_group(sg_name, vpc_id, expected)
+    if instance_id is None:
+        instance_id = create_instance(image_id, sg_id,
+                                      f"fenix-{group}-node-01",
+                                      {**expected, "Name": instance_name})
+        try:
+            described = ec2.describe_instances(InstanceIds=[instance_id])
+        except ClientError as error:
+            raise RetryableError("No se pudo verificar la instancia creada.") from error
+        created = described.get("Reservations", [])
+        created_tags = {}
+        if created and created[0].get("Instances"):
+            created_tags = {tag["Key"]: tag["Value"]
+                            for tag in created[0]["Instances"][0].get("Tags", [])}
+        if any(created_tags.get(key) != value for key, value in expected.items()):
+            raise RetryableError("La instancia creada no verifica sus etiquetas.")
+
+    inventory = load("data/inventory.json")
+    if not isinstance(inventory, dict):
+        raise PermanentError("El inventario existente no es un objeto JSON.")
+    inventory["node-01"] = {
+        "type": "ec2",
+        "id": instance_id,
+        "security_group_id": sg_id,
+        "expected_tags": dict(expected),
+    }
+    save("data/inventory.json", inventory)  # Persiste el ID antes de seguir.
+
+    # 4. Bucket estable por nombre; un fallo de etiquetado previo se completa aquí.
+    try:
+        tag_set = s3.get_bucket_tagging(Bucket=bucket_name)["TagSet"]
+    except ClientError as error:
+        code = error.response.get("Error", {}).get("Code")
+        if code in ("NoSuchBucket", "NoSuchBucketError", "404", "NotFound"):
+            create_bucket(bucket_name, expected)
+            try:
+                tag_set = s3.get_bucket_tagging(Bucket=bucket_name)["TagSet"]
+            except ClientError as verify_error:
+                raise RetryableError(
+                    "No se verificaron las etiquetas del bucket creado.") from verify_error
+        elif code == "NoSuchTagSet":
+            tag_set = []  # El bucket existe sin etiquetas: se completan abajo.
+        else:
+            raise RetryableError(
+                "No se pudieron leer las etiquetas del bucket.") from error
+    current = {tag["Key"]: tag["Value"] for tag in tag_set}
+    if any(current.get(key) not in (None, value) for key, value in expected.items()):
+        raise PermanentError("El bucket existente no coincide con el inventario.")
+    if any(current.get(key) != value for key, value in expected.items()):
+        merged = dict(current)
+        merged.update(expected)  # Las ajenas se conservan; las obligatorias mandan.
+        try:
+            s3.put_bucket_tagging(Bucket=bucket_name,
+                                  Tagging={"TagSet": aws_tags(merged)})
+            verified = s3.get_bucket_tagging(Bucket=bucket_name)["TagSet"]
+        except ClientError as error:
+            raise RetryableError(
+                "No se pudieron completar las etiquetas del bucket.") from error
+        final = {tag["Key"]: tag["Value"] for tag in verified}
+        if any(final.get(key) != value for key, value in expected.items()):
+            raise RetryableError("Las etiquetas del bucket no se verificaron.")
+
+    inventory = load("data/inventory.json")
+    if not isinstance(inventory, dict):
+        raise PermanentError("El inventario existente no es un objeto JSON.")
+    inventory["bucket-01"] = {
+        "type": "s3",
+        "id": bucket_name,
+        "expected_tags": dict(expected),
+    }
+    save("data/inventory.json", inventory)
+    return inventory
 
 
 def inject_fault(alias: str) -> None:
