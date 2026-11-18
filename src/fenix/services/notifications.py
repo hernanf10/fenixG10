@@ -1,5 +1,6 @@
 """Adaptador HTTP guiado. Elegir Telegram O Slack, no ambos obligatoriamente."""
 import os  # Recupera credenciales fuera del repositorio.
+import time  # Respeta una espera acotada si el proveedor responde 429.
 import requests  # Aplica timeout explícito a cada llamada HTTP.
 from fenix.utils.errors import PermanentError, RetryableError
 
@@ -33,4 +34,43 @@ def notify(text: str) -> None:
     # Usar timeout=(2, 5); capturar Timeout/ConnectionError sin copiar su mensaje.
     # 429 y 5xx son transitorios; leer Retry-After y documentar demora acotada.
     # Otros 4xx son permanentes; no reintentar infinitamente credenciales inválidas.
-    raise NotImplementedError("I4-A: implementar proveedor externo elegido")
+    if mode != "telegram":  # Slack y cualquier otro adaptador quedan fuera del alcance.
+        raise PermanentError("proveedor no soportado")
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
+    if not token or not chat_id:
+        raise PermanentError("Configuración de Telegram incompleta")
+    url = f"https://api.telegram.org/bot{token}/sendMessage"  # Nunca se registra.
+    payload = {"chat_id": chat_id, "text": text[:1000]}  # Sin parse_mode.
+
+    def send():
+        """Realiza un único POST con timeout acotado.
+
+        Returns:
+            Respuesta HTTP del proveedor.
+        Raises:
+            RetryableError: Si no hay respuesta por timeout o conexión.
+        """
+        try:
+            return requests.post(url, json=payload, timeout=(2, 5))
+        except (requests.Timeout, requests.ConnectionError):
+            # El mensaje original puede incluir el token en la URL: no se encadena.
+            raise RetryableError("Aviso transitorio: sin respuesta del proveedor") from None
+
+    response = send()
+    if response.status_code == 429:
+        retry_after = response.headers.get("Retry-After", "")
+        if not retry_after.isdigit() or int(retry_after) > 30:
+            raise RetryableError("El proveedor pidió esperar más de 30 segundos")
+        time.sleep(int(retry_after))  # Espera única y acotada; no hay bucle interno.
+        response = send()
+    if response.status_code == 429 or 500 <= response.status_code <= 599:
+        raise RetryableError("El proveedor sigue limitando o fallando")
+    if response.status_code != 200:
+        raise PermanentError("El proveedor rechazó la configuración del aviso")
+    try:
+        body = response.json()
+    except ValueError:
+        raise PermanentError("Respuesta del proveedor no interpretable") from None
+    if not isinstance(body, dict) or body.get("ok") is not True:
+        raise PermanentError("El proveedor no confirmó el aviso")
