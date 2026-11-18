@@ -27,7 +27,18 @@ def ensure_queues(prefix: str) -> tuple[str, str]:
     # Crear RedrivePolicy con json.dumps, deadLetterTargetArn=arn y maxReceiveCount="3".
     # Usar set_queue_attributes para asegurar la política aunque la cola exista.
     # Retornar las URLs devueltas por SQS; no construirlas con strings.
-    raise NotImplementedError("I2-A: completar cola principal y RedrivePolicy")
+    work = sqs.create_queue(QueueName=f"{prefix}-events", Attributes={
+        "VisibilityTimeout": "45",
+        "MessageRetentionPeriod": "345600",
+    })["QueueUrl"]  # Retiene la orden cuatro días en la cola principal.
+    redrive = json.dumps({
+        "deadLetterTargetArn": arn,
+        "maxReceiveCount": "3",
+    })  # Derivación automática tras superar el tercer intento.
+    sqs.set_queue_attributes(QueueUrl=work, Attributes={
+        "RedrivePolicy": redrive,
+    })  # Asegura la política también cuando la cola ya existía.
+    return work, dead
 
 
 def queue_url(prefix: str) -> str:
@@ -124,4 +135,11 @@ def retry_later(url: str, message: dict) -> int:
     # Calcular min(30, 2 ** count) y llamar change_message_visibility.
     # Pasar el ReceiptHandle actual; retornar segundos para registrarlos.
     # Nunca send_message aquí: una copia reiniciaría la cuenta de recepciones.
-    raise NotImplementedError("I2-B: programar backoff con visibilidad")
+    count = int(message["Attributes"]["ApproximateReceiveCount"])
+    seconds = min(30, 2 ** count)
+    client("sqs").change_message_visibility(
+        QueueUrl=url,
+        ReceiptHandle=message["ReceiptHandle"],
+        VisibilityTimeout=seconds,
+    )  # El mensaje original conserva su cuenta de recepciones.
+    return seconds
