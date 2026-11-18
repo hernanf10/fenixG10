@@ -3,7 +3,7 @@ import json  # Convierte Body solo dentro del control por mensaje.
 import time  # Evita un bucle intensivo si el emulador no responde.
 from botocore.exceptions import BotoCoreError, ClientError
 from fenix.services.sqs import receive, acknowledge, retry_later
-from fenix.utils.errors import ProjectError
+from fenix.utils.errors import ProjectError, ValidationError
 
 
 def run(url: str, handler, logger, once: bool = False) -> None:
@@ -35,4 +35,94 @@ def run(url: str, handler, logger, once: bool = False) -> None:
     # 8. Fallos del transporte o de retry_later: registrar y volver tras 2 segundos.
     # 9. once termina tras una consulta; Ctrl+C sale y el main cierra el listener.
     # 10. Los NotImplementedError deben propagarse: revelan que falta completar.
-    raise NotImplementedError("I5-A: implementar ciclo de vida del worker")
+    try:
+        while True:
+            try:
+                messages = receive(url)  # El transporte puede fallar sin mensaje.
+            except (BotoCoreError, ClientError) as error:
+                logger.error("fallo_transporte", extra={
+                    "event_id": None,
+                    "message_id": None,
+                    "attempt": None,
+                    "action": "receive",
+                    "status": type(error).__name__,
+                })  # Solo el tipo de excepción, sin URL ni credenciales.
+                if once:
+                    return
+                time.sleep(2)  # Espera acotada antes de reintentar la consulta.
+                continue
+            for message in messages:
+                message_id = message.get("MessageId")
+                attempt = None
+                count = (message.get("Attributes") or {}).get("ApproximateReceiveCount")
+                if count is not None:
+                    try:
+                        attempt = int(count)
+                    except (TypeError, ValueError):
+                        attempt = None  # El contexto queda nulo, no se inventa.
+                event_id = None
+                try:
+                    event = json.loads(message["Body"])  # El parseo es por mensaje.
+                    if not isinstance(event, dict):
+                        raise ValidationError("El cuerpo no es un objeto JSON.")
+                    if isinstance(event.get("event_id"), str):
+                        event_id = event["event_id"]  # Correlación pública.
+                    handler(event)  # Revalida el contrato y ejecuta el negocio.
+                except (json.JSONDecodeError, ProjectError, BotoCoreError,
+                        ClientError, OSError, KeyError, TypeError) as error:
+                    logger.error("mensaje_rechazado", extra={
+                        "event_id": event_id,
+                        "message_id": message_id,
+                        "attempt": attempt,
+                        "action": "handler",
+                        "status": type(error).__name__,
+                    })  # Sin cuerpo ni ReceiptHandle en el log.
+                    try:
+                        delay = retry_later(url, message)  # Solo visibilidad.
+                    except (BotoCoreError, ClientError, KeyError, TypeError,
+                            ValueError) as retry_error:
+                        logger.error("fallo_retry_later", extra={
+                            "event_id": event_id,
+                            "message_id": message_id,
+                            "attempt": attempt,
+                            "action": "retry_later",
+                            "status": type(retry_error).__name__,
+                        })  # Sin ACK: la visibilidad devuelve el mensaje solo.
+                    else:
+                        logger.warning("reintento_programado", extra={
+                            "event_id": event_id,
+                            "message_id": message_id,
+                            "attempt": attempt,
+                            "action": "retry_later",
+                            "status": f"retry_in_{delay}s",
+                        })  # El mensaje original conserva sus recepciones.
+                else:
+                    try:
+                        acknowledge(url, message["ReceiptHandle"])  # ACK final.
+                    except (BotoCoreError, ClientError, KeyError) as ack_error:
+                        logger.error("fallo_ack", extra={
+                            "event_id": event_id,
+                            "message_id": message_id,
+                            "attempt": attempt,
+                            "action": "acknowledge",
+                            "status": type(ack_error).__name__,
+                        })  # El mensaje reaparecerá por visibilidad.
+                    else:
+                        logger.info("mensaje_confirmado", extra={
+                            "event_id": event_id,
+                            "message_id": message_id,
+                            "attempt": attempt,
+                            "action": "acknowledge",
+                            "status": "acknowledged",
+                        })  # El ACK se registra después de la confirmación del SDK.
+            if once:
+                return  # Una única consulta aunque no hubiera mensajes.
+    except KeyboardInterrupt:
+        logger.info("detenido_por_operador", extra={
+            "event_id": None,
+            "message_id": None,
+            "attempt": None,
+            "action": "stop",
+            "status": "interrupted",
+        })  # El main cierra el listener y ningún finally confirma mensajes.
+        return
