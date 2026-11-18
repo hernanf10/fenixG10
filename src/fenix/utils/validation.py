@@ -19,7 +19,11 @@ def identifier(value: str) -> str:
     """
     # TODO I1-A: usar isinstance y re.fullmatch con r"[a-z0-9-]{3,32}".
     # No convertir automáticamente a minúsculas: podría cambiar la identidad.
-    raise NotImplementedError("I1-A: validar identifier")  # Quitar al completar.
+    if not isinstance(value, str):
+        raise ValidationError("El identificador debe ser texto.")
+    if re.fullmatch(r"[a-z0-9-]{3,32}", value) is None:
+        raise ValidationError("Identificador inválido: se espera [a-z0-9-]{3,32}.")
+    return value
 
 
 def ttl_seconds(value: str) -> int:
@@ -37,7 +41,15 @@ def ttl_seconds(value: str) -> int:
     """
     # TODO I1-B: convertir con int y capturar ValueError con encadenamiento.
     # Comprobar 60 <= ttl <= 600; no aceptar decimales ni valores negativos.
-    raise NotImplementedError("I1-B: validar TTL")  # Sustituir por la validación.
+    if not isinstance(value, str):
+        raise ValidationError("El TTL debe llegar como texto entero.")
+    try:
+        ttl = int(value)
+    except ValueError as error:
+        raise ValidationError("El TTL debe ser un entero sin decimales.") from error
+    if not 60 <= ttl <= 600:
+        raise ValidationError("El TTL debe estar entre 60 y 600 segundos.")
+    return ttl
 
 
 def utc_text(value: str) -> datetime:
@@ -53,4 +65,12 @@ def utc_text(value: str) -> datetime:
     """
     # TODO I1-C: usar fromisoformat, reemplazando Z por +00:00.
     # Rechazar tzinfo ausente y utcoffset distinto de timedelta(0).
-    raise NotImplementedError("I1-C: interpretar UTC")  # No usar hora local.
+    if not isinstance(value, str):
+        raise ValidationError("La fecha debe llegar como texto ISO 8601.")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise ValidationError("La fecha no cumple el formato ISO 8601.") from error
+    if parsed.tzinfo is None or parsed.utcoffset() != timezone.utc.utcoffset(None):
+        raise ValidationError("La fecha debe declarar UTC explícito.")
+    return parsed
