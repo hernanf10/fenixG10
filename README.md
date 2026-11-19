@@ -38,84 +38,53 @@ Qué demuestra:
 
 | Componente | Versión / requisito | Verificación |
 | --- | --- | --- |
-| Sistema operativo | GNU/Linux (probado en Debian 13); macOS/WSL con bash similar; Windows 11 (ver guía PowerShell en 4.4) | `uname -a` o `py --version` |
-| Python | 3.11 o superior (`pyproject.toml`: `requires-python = ">=3.11"`) | `python3 --version` |
+| Sistema operativo | GNU/Linux (probado en Debian 13), macOS/WSL o Windows 11 | `python --version` |
+| Python | 3.11 o superior (`pyproject.toml`: `requires-python = ">=3.11"`) | `python --version` o `py -3.11 --version` |
 | Docker Engine | Con Compose v2 (`docker compose`, no `docker-compose`) | `docker compose version` |
-| LocalStack | Imagen fijada en `.env` (`LOCALSTACK_IMAGE=localstack/localstack:2026.10.0`) | `docker compose ps` (estado `healthy`) |
-| Dependencias Python | `boto3`, `fastapi`, `uvicorn`, `requests`, `python-dotenv`, `pytest`, `httpx` (`requirements.txt`) | `pip install -r requirements.txt` |
-| `curl` | Opcional, para pruebas HTTP manuales | `curl --version` |
+| LocalStack | Imagen definida en `.env` (`LOCALSTACK_IMAGE`) | `http://localhost:4566/_localstack/health` |
+| Git | Necesario para clonar el repositorio | `git --version` |
 
-> **Versiones exactas para la entrega:** generar el lock con `pip freeze > requirements-lock.txt` y adjuntarlo. <!-- COMPLETAR: versionar requirements-lock.txt antes de entregar. -->
+Las dependencias Python se instalan desde `pyproject.toml`, que toma la lista de `requirements.txt`. `requirements-lock.txt` es una instantánea de versiones; actualizarlo solo cuando se renueven las dependencias.
 
 El emulador se levanta con EC2 en modo **mock** (`EC2_VM_MANAGER=mock`); no se ejecuta una VM real. LocalStack puede requerir `LOCALSTACK_AUTH_TOKEN` según el plan/imagen de la cátedra: si la imagen elegida lo exige, completarlo en `.env`.
 
 ---
 
-## 4. Instalación desde cero
+## 4. Instalación
 
-Todos los comandos se ejecutan desde la raíz del repositorio, en una terminal con el entorno virtual activado.
+Elegí la guía de tu sistema operativo. Los comandos de preparación se ejecutan una sola vez desde la raíz del repositorio; el inicio del laboratorio y el ejemplo completo están en la sección 8.
 
-### 4.1 Clonar e instalar
+### 4.1 Linux o macOS (Bash)
 
-```bash
-# 1. Clonar el repositorio
-git clone <URL-DEL-REPOSITORIO> fenixG10   # <!-- COMPLETAR: URL real del repositorio -->
-cd fenixG10
+1. Instalar Python 3.11 o superior, Git y Docker con Compose v2.
+2. Clonar el repositorio (reemplazar la URL por la dirección real):
 
-# 2. Crear y activar el entorno virtual
-python3 -m venv .venv
-source .venv/bin/activate
+   ```bash
+   git clone "URL_DEL_REPOSITORIO" fenixG10
+   cd fenixG10
+   ```
 
-# 3. Instalar el paquete y sus dependencias
-python -m pip install --upgrade pip
-pip install -e .
-pip install -r requirements.txt
+3. Crear y activar el entorno virtual, e instalar el proyecto:
 
-# 4. Crear el archivo de configuración local
-cp .env.example .env
+   ```bash
+   python3 -m venv .venv
+   source .venv/bin/activate
+   python -m pip install --upgrade pip
+   python -m pip install -e .
+   ```
 
-# 5. Generar un WEBHOOK_SECRET y copiarlo en .env
-python -c "import secrets; print(secrets.token_urlsafe(32))"
-# Editar .env: WEBHOOK_SECRET=<resultado del comando anterior> (mínimo 16 caracteres)
-```
+4. Crear `.env` solo si aún no existe y generar el secreto:
 
-### 4.2 Levantar LocalStack e inicializar el laboratorio
+   ```bash
+   test -f .env || cp .env.example .env
+   python -c "import secrets; print(secrets.token_urlsafe(32))"
+   ```
 
-```bash
-# 6. Iniciar el emulador (lee LOCALSTACK_IMAGE del .env)
-docker compose up -d
+   Pegar el valor generado en `WEBHOOK_SECRET=` y completar las demás variables de la sección 5. Para el flujo completo, hacen falta el token de Telegram, el `TELEGRAM_CHAT_ID` y el token de LocalStack entregado para la cátedra. No usar credenciales reales de AWS.
 
-# 7. Esperar a que el contenedor esté healthy
-docker compose ps
+### 4.2 Windows 11 (PowerShell desde Visual Studio o VS Code)
 
-# 8. Crear (o reutilizar) la cola de trabajo y su DLQ
-python -m fenix.cli init-queues
-
-# 9. Crear (o reutilizar) la instancia mock, su SG y el bucket del grupo
-python -m fenix.cli setup-demo
-```
-
-`init-queues` imprime una tupla `(work_url, dlq_url)` y `setup-demo` imprime el inventario con los IDs reales del emulador. Ambos comandos son idempotentes: repetirlos conserva los mismos recursos y no duplica colas, instancias ni buckets.
-
-> **No borrar `data/` mientras existan recursos:** contiene el inventario que permite reconocerlos. Si LocalStack se reinicia desde cero, los IDs pueden dejar de existir: volver a ejecutar `init-queues` y `setup-demo` y revisar el inventario.
-
-### 4.3 Verificar la instalación
-
-```bash
-# Pruebas unitarias (no requieren LocalStack)
-pytest -v -m "not integracion"
-
-# Pruebas de integración (requieren LocalStack + setup-demo)
-pytest -v -m integracion
-```
-
-### 4.4 Instalación y ejecución en Windows 11 con PowerShell
-
-Estos pasos se ejecutan en PowerShell, desde la terminal integrada de **Visual Studio** (`View > Terminal`) o **Visual Studio Code** (`Terminal > New Terminal`, perfil PowerShell). El IDE se usa para editar y abrir la terminal; el proyecto no necesita una carga de trabajo de C++ ni compilarse desde Visual Studio.
-
-#### Instalar las herramientas necesarias
-
-1. Abrir PowerShell. Si `winget` está disponible, instalar Python 3.11, Git y Docker Desktop:
+1. Abrir una terminal PowerShell. Instalar Python 3.11, Git y Docker Desktop con `winget`:
 
    ```powershell
    winget install --id Python.Python.3.11 --exact
@@ -123,27 +92,27 @@ Estos pasos se ejecutan en PowerShell, desde la terminal integrada de **Visual S
    winget install --id Docker.DockerDesktop --exact
    ```
 
-   También se pueden instalar desde Microsoft Store o sus sitios oficiales. Si el instalador lo solicita, reiniciar Windows. Docker Desktop requiere WSL 2 y contenedores Linux; completar su configuración inicial y esperar a que indique que el motor está iniciado.
+   Si `winget` no está disponible, instalar las herramientas desde Microsoft Store o sus sitios oficiales. Si se solicita, reiniciar Windows. Docker Desktop requiere WSL 2 y contenedores Linux; iniciar Docker Desktop y completar su configuración inicial.
 
-2. Comprobar si WSL está instalado:
+2. Comprobar WSL:
 
    ```powershell
    wsl --status
    ```
 
-   Si todavía no está instalado, ejecutar PowerShell como administrador, instalarlo y reiniciar Windows:
+   Si WSL aún no está instalado, ejecutar PowerShell como administrador:
 
    ```powershell
    wsl --install
    ```
 
-   Después del reinicio, abrir una terminal nueva y ejecutar:
+   Reiniciar Windows si lo solicita y luego actualizar WSL:
 
    ```powershell
    wsl --update
    ```
 
-3. Cerrar y volver a abrir la terminal para actualizar el `PATH`, iniciar Docker Desktop y comprobar las instalaciones:
+3. Cerrar y volver a abrir la terminal para actualizar el `PATH`. Comprobar las herramientas:
 
    ```powershell
    py -3.11 --version
@@ -152,111 +121,52 @@ Estos pasos se ejecutan en PowerShell, desde la terminal integrada de **Visual S
    docker info --format '{{.OSType}}'
    ```
 
-   El último comando debe mostrar `linux`. Si `py`, `git` o `docker` no se reconocen, completar/reiniciar la instalación correspondiente y abrir una terminal nueva. Iniciar Docker Desktop antes de continuar.
+   Docker debe informar `linux` como tipo de contenedor. Si algún comando no se reconoce, finalizar la instalación y abrir una terminal nueva.
 
-#### Obtener el proyecto
+4. Clonar el repositorio (reemplazar la URL por la dirección real). Si ya se abrió la carpeta del proyecto en el IDE, pasar al paso 5:
 
-Desde PowerShell, crear/abrir la carpeta donde se guardará el repositorio y clonarlo. Reemplazar el texto entre comillas por la URL real:
+   ```powershell
+   New-Item -ItemType Directory -Force "$HOME\source" | Out-Null
+   Set-Location "$HOME\source"
+   git clone "URL_DEL_REPOSITORIO" fenixG10
+   Set-Location .\fenixG10
+   ```
 
-```powershell
-New-Item -ItemType Directory -Force "$HOME\source" | Out-Null
-Set-Location "$HOME\source"
-git clone "URL_DEL_REPOSITORIO" fenixG10
-Set-Location .\fenixG10
-```
-
-Si ya se tiene el proyecto, abrir esa carpeta en Visual Studio/Visual Studio Code y ejecutar `Set-Location` hacia su raíz. En los pasos siguientes, la raíz debe ser `fenixG10`.
-
-#### Preparar el entorno
-
-1. Crear y activar un entorno virtual:
+5. Crear y activar el entorno virtual:
 
    ```powershell
    py -3.11 -m venv .venv
    .\.venv\Scripts\Activate.ps1
    ```
 
-   Si PowerShell bloquea el script de activación, permitir scripts solo en la terminal actual y volver a activarlo:
+   Si PowerShell bloquea la activación, permitir scripts solo en la terminal actual y volver a activar:
 
    ```powershell
    Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
    .\.venv\Scripts\Activate.ps1
    ```
 
-2. Instalar el proyecto y sus dependencias:
+6. Instalar el proyecto y preparar `.env`:
 
    ```powershell
    python -m pip install --upgrade pip
    python -m pip install -e .
-   python -m pip install -r requirements.txt
-   ```
-
-3. Crear la configuración local y generar un secreto para el webhook:
-
-   ```powershell
    if (-not (Test-Path .env)) { Copy-Item .env.example .env }
    python -c "import secrets; print(secrets.token_urlsafe(32))"
    notepad .env
    ```
 
-   Si `.env` ya existe, se conserva. Copiar el secreto generado en `WEBHOOK_SECRET=` y guardar el archivo. Si la imagen de LocalStack utilizada lo requiere, completar también `LOCALSTACK_AUTH_TOKEN`. No usar credenciales reales de AWS.
+   Copiar el secreto generado en `WEBHOOK_SECRET=`, completar las demás variables de la sección 5 y guardar el archivo. Para el flujo completo, hacen falta el token de Telegram, el `TELEGRAM_CHAT_ID` y el token de LocalStack entregado para la cátedra. No usar credenciales reales de AWS.
 
-4. Iniciar LocalStack y crear los recursos del laboratorio:
+### 4.3 Verificar la instalación
 
-   ```powershell
-   docker compose up -d
-   docker compose ps
-   Invoke-RestMethod -Uri http://localhost:4566/_localstack/health
-   python -m fenix.cli init-queues
-   python -m fenix.cli setup-demo
-   ```
+Con el entorno virtual activado, ejecutar las pruebas unitarias:
 
-   Esperar a que Docker muestre el contenedor en ejecución y que el endpoint de salud responda antes de crear recursos. `init-queues` y `setup-demo` pueden ejecutarse nuevamente sin duplicarlos.
-
-#### Ejemplo de ejecución
-
-Usar tres terminales PowerShell integradas, todas abiertas en la raíz `fenixG10`, con el entorno virtual activado en cada una. Si se abre una terminal nueva:
-
-```powershell
-.\.venv\Scripts\Activate.ps1
+```text
+python -m pytest -v -m "not integracion"
 ```
 
-1. En la **Terminal 1**, iniciar el receptor:
-
-   ```powershell
-   python -m uvicorn fenix.services.receiver:app --host 127.0.0.1 --port 8000 --workers 1 --env-file .env
-   ```
-
-2. En la **Terminal 2**, iniciar el worker:
-
-   ```powershell
-   python -m fenix.cli worker
-   ```
-
-3. En la **Terminal 3**, provocar que la instancia mock quede detenida, generar un evento con timestamp UTC actual e ID único, y enviarlo:
-
-   ```powershell
-   python -m fenix.cli fault node-01
-
-   $event = [ordered]@{
-       schema_version = 1
-       event_id = "evt-node-$([guid]::NewGuid().ToString('N').Substring(0, 8))"
-       event_type = "instance.stopped"
-       resource_id = "node-01"
-       occurred_at = [DateTime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ")
-       simulate_failures = 0
-   }
-   $event | ConvertTo-Json -Compress | Set-Content -Path .\windows-node-event.json -Encoding Ascii
-
-   python -m fenix.cli send .\windows-node-event.json
-   Remove-Item .\windows-node-event.json
-   ```
-
-   La respuesta esperada del envío es `202`; el worker procesa el mensaje, repara la instancia y emite la notificación configurada (por defecto, a la consola). Al terminar, detener el receptor y el worker con `Ctrl+C`. Para detener LocalStack:
-
-   ```powershell
-   docker compose down
-   ```
+Las pruebas de integración requieren que LocalStack y los recursos del laboratorio estén preparados; los pasos están en la sección 8.
 
 ---
 
@@ -274,14 +184,14 @@ El archivo `.env` no se versiona. `.env.example` contiene valores ficticios para
 | `QUEUE_PREFIX` | Prefijo de las colas: `<prefijo>-events` y `<prefijo>-dlq` | `fenix-grupo01` |
 | `PROJECT` | Nombre de proyecto (informativo) | `fenix` |
 | `WEBHOOK_SECRET` | Secreto HMAC del webhook (mínimo 16 caracteres; **nunca** versionarlo) | `<generado con secrets.token_urlsafe(32)>` |
-| `NOTIFY_PROVIDER` | Proveedor de avisos: `console` (desarrollo) o `telegram` (real) | `console` |
-| `TELEGRAM_BOT_TOKEN` | Token del bot de Telegram (solo si `NOTIFY_PROVIDER=telegram`) | `<token del bot>` |
-| `TELEGRAM_CHAT_ID` | Chat autorizado para recibir el aviso | `<chat_id>` |
-| `SLACK_WEBHOOK_URL` | Reservado; Slack **no está implementado** en esta entrega | *(vacío)* |
-| `LOCALSTACK_AUTH_TOKEN` | Token de activación de LocalStack, si la imagen lo requiere | *(vacío o token de la cátedra)* |
+| `NOTIFY_PROVIDER` | Proveedor de avisos: `console` (desarrollo) o `telegram` (flujo probado) | `telegram` |
+| `TELEGRAM_BOT_TOKEN` | Token entregado por `@BotFather`; mantenerlo privado | `<token del bot>` |
+| `TELEGRAM_CHAT_ID` | ID de chat obtenido con `getUpdates` (ver sección 13) | `<chat_id>` |
+| `SLACK_WEBHOOK_URL` | Slack no está implementado; dejar vacío | *(vacío)* |
+| `LOCALSTACK_AUTH_TOKEN` | Token de la cuenta LocalStack entregado para la cátedra | `<token de LocalStack>` |
 | `LOCALSTACK_IMAGE` | Imagen de LocalStack usada por `compose.yaml` | `localstack/localstack:2026.10.0` |
 
-> `settings.py` carga `.env` con `python-dotenv`. La CLI y uvicorn (`--env-file .env`) lo hacen automáticamente. Para ejecutar `notify()` en un one-liner hay que exportar el entorno: `set -a; source .env; set +a`.
+> La CLI y uvicorn (`--env-file .env`) cargan `.env` automáticamente. En un script Python independiente, cargarlo con `from dotenv import load_dotenv; load_dotenv()`. No compartir ni versionar `.env`.
 
 ---
 
@@ -316,7 +226,7 @@ Notas:
 
 ### 7.1 Evento de entrada (contrato cerrado)
 
-Todos los campos son obligatorios y no se admiten claves extra:
+Todos los campos son obligatorios y no se admiten claves extra. El siguiente JSON ilustra la estructura; para enviarlo hay que actualizar `occurred_at` e `event_id` (ver ejemplo ejecutable en la sección 8):
 
 ```json
 {
@@ -324,7 +234,7 @@ Todos los campos son obligatorios y no se admiten claves extra:
   "event_id": "evt-node-001",
   "event_type": "instance.stopped",
   "resource_id": "node-01",
-  "occurred_at": "2026-10-22T18:00:00Z",
+  "occurred_at": "AAAA-MM-DDTHH:MM:SSZ",
   "simulate_failures": 0
 }
 ```
@@ -427,64 +337,132 @@ Content-Type: application/json
 
 ## 8. Ejecución por terminal
 
-Se necesitan tres terminales con el entorno activado (`source .venv/bin/activate`) y `LocalStack` corriendo.
+Los comandos de esta sección sirven tanto para Bash como para PowerShell. En PowerShell, abrir las terminales desde **Visual Studio > View > Terminal** o **Visual Studio Code > Terminal > New Terminal**.
 
-### Terminal 1 — receptor HTTP
+### 8.1 Iniciar LocalStack y preparar el laboratorio
 
-```bash
-python -m uvicorn fenix.services.receiver:app \
-  --host 127.0.0.1 --port 8000 --workers 1 --env-file .env
+Desde la raíz del proyecto y con Docker Desktop iniciado:
+
+```text
+docker compose up -d
+docker compose ps
 ```
 
-### Terminal 2 — worker
+Comprobar que LocalStack y sus servicios estén listos:
 
-```bash
-# Consumidor continuo (Ctrl+C lo detiene de forma controlada)
-python -m fenix.cli worker
-
-# Una sola consulta (útil para pruebas)
-python -m fenix.cli worker --once
+```text
+python -c "import requests; r=requests.get('http://localhost:4566/_localstack/health', timeout=5); r.raise_for_status(); print(r.json())"
 ```
 
-### Terminal 3 — operación del laboratorio
+Confirmar que `sqs`, `s3` y `ec2` estén disponibles. Si todavía están iniciando, esperar y repetir la consulta. Cuando estén listos, crear las colas y los recursos:
 
-```bash
-# Colas y recursos (idempotentes)
+```text
 python -m fenix.cli init-queues
 python -m fenix.cli setup-demo
-
-# Fallas controladas
-python -m fenix.cli fault node-01      # detiene la instancia mock (verifica stopped)
-python -m fenix.cli fault bucket-01    # elimina la etiqueta Owner del bucket
-
-# Enviar un evento firmado al receptor
-python -m fenix.cli send examples/node-event.json
-python -m fenix.cli send examples/bucket-event.json
 ```
 
-`send` firma exactamente los bytes del archivo y muestra el código y el cuerpo de la respuesta (`202` con `event_id` y `message_id`).
+Ambos comandos son idempotentes: se pueden repetir sin duplicar colas ni recursos.
 
-> **Importante:** antes de reutilizar un ejemplo, actualizar `occurred_at` a la fecha del ensayo y usar un `event_id` nuevo cuando se fabrique una falla nueva. Repetir el mismo `event_id` es idempotente; cambiar el contenido con el mismo `event_id` es un conflicto.
+### 8.2 Abrir el receptor y el worker
 
-### Verificación por API (sin confiar en logs)
+Abrir tres terminales en la raíz del proyecto. Activar el entorno virtual en cada terminal nueva:
 
 ```bash
-python - <<'PY'
+source .venv/bin/activate
+```
+
+En PowerShell:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+**Terminal 1 — receptor HTTP:**
+
+```text
+python -m uvicorn fenix.services.receiver:app --host 127.0.0.1 --port 8000 --workers 1 --env-file .env
+```
+
+**Terminal 2 — worker continuo:**
+
+```text
+python -m fenix.cli worker
+```
+
+`Ctrl+C` detiene ambos procesos. Para procesar una sola consulta en lugar de dejar el worker activo, usar `python -m fenix.cli worker --once` en la Terminal 2.
+
+### 8.3 Provocar una falla y enviar un evento
+
+En la **Terminal 3**, crear una falla y un evento con timestamp UTC actual e ID único. El ejemplo usa `node-01`:
+
+```text
+python -m fenix.cli fault node-01
+```
+
+Abrir el intérprete de Python:
+
+```text
+python
+```
+
+En el prompt de Python, pegar este bloque y luego salir con `exit()`:
+
+```python
+import datetime
 import json
+import uuid
+from pathlib import Path
+
+event = {
+    "schema_version": 1,
+    "event_id": "evt-node-" + uuid.uuid4().hex[:8],
+    "event_type": "instance.stopped",
+    "resource_id": "node-01",
+    "occurred_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    "simulate_failures": 0,
+}
+Path("node-event-local.json").write_text(json.dumps(event), encoding="utf-8")
+```
+
+Enviar el evento firmado desde la terminal:
+
+```text
+python -m fenix.cli send node-event-local.json
+```
+
+La respuesta esperada es `202`; luego el worker procesa el mensaje, repara la instancia y notifica por consola. Para probar el bucket, provocar la falla con `python -m fenix.cli fault bucket-01` y cambiar en el bloque Python `event_type` a `bucket.tags_missing` y `resource_id` a `bucket-01`.
+
+El emisor firma exactamente los bytes del archivo. Cada falla nueva debe tener un `event_id` nuevo; repetir el mismo ID con el mismo contenido es idempotente, y cambiar su contenido produce un conflicto.
+
+Al finalizar, detener receptor y worker con `Ctrl+C`, borrar el evento temporal y detener LocalStack:
+
+```text
+python -c "from pathlib import Path; Path('node-event-local.json').unlink(missing_ok=True)"
+docker compose down
+```
+
+### 8.4 Verificar el estado por API
+
+Con LocalStack en ejecución y el entorno virtual activado, iniciar el intérprete:
+
+```text
+python
+```
+
+Pegar este bloque para consultar el estado por API. `node` debe mostrar `running`; al terminar, salir con `exit()`:
+
+```python
 from dotenv import load_dotenv
 load_dotenv()
 from fenix.config.settings import client
 from fenix.utils.state import load
 
-inventario = load("data/inventory.json")
-node = inventario["node-01"]["id"]
-bucket = inventario["bucket-01"]["id"]
-
-instancia = client("ec2").describe_instances(InstanceIds=[node])
-print(instancia["Reservations"][0]["Instances"][0]["State"]["Name"])
-print(client("s3").get_bucket_tagging(Bucket=bucket)["TagSet"])
-print(json.dumps(load("data/events.json"), indent=2, ensure_ascii=False))
-PY
+inventory = load("data/inventory.json")
+node_id = inventory["node-01"]["id"]
+bucket_id = inventory["bucket-01"]["id"]
+instance = client("ec2").describe_instances(InstanceIds=[node_id])
+print(instance["Reservations"][0]["Instances"][0]["State"]["Name"])
+print(client("s3").get_bucket_tagging(Bucket=bucket_id)["TagSet"])
 ```
 
 ---
@@ -542,7 +520,7 @@ pytest -v -m integracion         # integración: 6 passed
 | ID | Caso y preparación | Esperado | Obtenido | Prueba / evidencia |
 | --- | --- | --- | --- | --- |
 | F01 | `init-queues` y `setup-demo` dos veces | Mismas colas y recursos; sin duplicados | `ensure_queues` devuelve las mismas URLs y una sola cola `-events`/`-dlq`; `setup-demo` conserva IDs y tags | `test_f01_init_queues_idempotente` (integración). Recursos demo: evidencia manual <!-- COMPLETAR --> |
-| F02 | Nodo detenido, evento firmado válido | `running` verificado, ledger completo, aviso y ACK | `repair` devuelve `repaired`, el estado real es `running`; segunda reparación `already_ok` | `test_f02_reparacion_ec2_converge` (integración). Circuito completo con ledger/aviso/ACK: <!-- COMPLETAR --> |
+| F02 | Nodo detenido, evento firmado válido | `running` verificado, ledger completo, aviso y ACK | `repair` devuelve `repaired`, el estado real es `running`; segunda reparación `already_ok` | `test_f02_reparacion_ec2_converge` (integración). Prueba manual integral confirmada por el equipo; aviso recibido en Telegram. |
 | F03 | Bucket sin `Owner` | Tags restauradas y etiquetas ajenas preservadas | `repair` devuelve `repaired`; `expected_tags` presentes; repetir da `already_ok` | `test_f03_reparacion_tags_bucket` (integración) |
 | F04 | Firma ausente/alterada y timestamp viejo | `401` y ningún mensaje nuevo | Tres casos `401`; lista de publicados vacía | `test_f04_firma_invalida_401` |
 | F05 | Mismos datos JSON con bytes distintos | `401` por HMAC inválida | Cuerpo distinto `401`; el original firmado `202` | `test_f05_bytes_distintos_misma_firma_401` |
@@ -590,9 +568,9 @@ Las pruebas de integración se saltan automáticamente con `pytest.skip("requier
 
 ---
 
-## 13. Evidencia del canal elegido (Telegram)
+## 13. Configuración y evidencia de Telegram
 
-Proveedor elegido: **Telegram** (`NOTIFY_PROVIDER=telegram`).
+El proyecto queda configurado para enviar avisos por Telegram (`NOTIFY_PROVIDER=telegram`). Completar estas variables en `.env`; el token y el ID reales no deben escribirse en el repositorio:
 
 Configuración (sin exponer secretos en el repositorio):
 
@@ -602,12 +580,40 @@ TELEGRAM_BOT_TOKEN=<token del bot creado con BotFather>
 TELEGRAM_CHAT_ID=<chat_id autorizado>
 ```
 
-Prueba controlada del adaptador (exportando `.env` para el one-liner):
+### Obtener `TELEGRAM_CHAT_ID`
 
-```bash
-set -a; source .env; set +a
-NOTIFY_PROVIDER=telegram python -c \
-  "from fenix.services.notifications import notify; notify('evt-test: repaired')"
+1. Crear el bot con `@BotFather` y guardar el token en `.env`.
+2. Desde la cuenta o grupo receptor, abrir el bot y enviarle `/start` (en grupos, agregar el bot y enviar un mensaje).
+3. En la raíz del proyecto, con el entorno virtual activado, iniciar Python:
+
+   ```text
+   python
+   ```
+
+4. Consultar la API de Telegram desde el intérprete. El código imprime solo los IDs recibidos; copiar el ID correcto a `TELEGRAM_CHAT_ID` en `.env`:
+
+   ```python
+   import os
+   import requests
+   from dotenv import load_dotenv
+
+   load_dotenv()
+   response = requests.get(
+       "https://api.telegram.org/bot" + os.environ["TELEGRAM_BOT_TOKEN"] + "/getUpdates",
+       timeout=10,
+   )
+   response.raise_for_status()
+   print([update["message"]["chat"]["id"]
+          for update in response.json().get("result", [])
+          if "message" in update])
+   ```
+
+   Salir del intérprete con `exit()`. Si la lista está vacía, enviar otro mensaje al bot y consultar de nuevo. Mantener el token privado; no pegarlo en capturas, chats ni archivos versionados.
+
+Prueba controlada del adaptador (carga `.env` y funciona en Bash y PowerShell):
+
+```text
+python -c "from dotenv import load_dotenv; load_dotenv(); from fenix.services.notifications import notify; notify('evt-test: repaired')"
 ```
 
 Resultado esperado: HTTP `200` y JSON con `ok=true`; el mensaje llega al chat autorizado. Un `429`/`5xx`/timeout se registra como transitorio y no borra el mensaje de SQS; `400/401/403` se diagnostica como configuración.
@@ -622,69 +628,22 @@ Evidencias (ocultar token, chat_id y URL privada):
 
 ---
 
-## 14. Limpieza del laboratorio
+## 14. Detener el laboratorio
 
-Detener primero receptor y worker (`Ctrl+C`). Documentar la DLQ **antes** de borrar colas.
+1. Si se necesita evidencia de la DLQ, leerla y guardarla **antes** de detener LocalStack.
+2. Detener el receptor y el worker con `Ctrl+C`.
+3. En la raíz del proyecto, detener y quitar el contenedor:
 
-```bash
-source .venv/bin/activate
+   ```text
+   docker compose down
+   ```
 
-# 1. Terminar la instancia, vaciar/borrar el bucket y eliminar el SG del inventario
-python - <<'PY'
-import time
-from dotenv import load_dotenv
-load_dotenv()
-from fenix.config.settings import client
-from fenix.utils.state import load
-
-inventario = load("data/inventory.json")
-ec2, s3 = client("ec2"), client("s3")
-node = inventario.get("node-01")
-bucket = inventario.get("bucket-01")
-
-if bucket:
-    nombre = bucket["id"]
-    objetos = s3.list_objects_v2(Bucket=nombre).get("Contents", [])
-    if objetos:
-        s3.delete_objects(Bucket=nombre, Delete={
-            "Objects": [{"Key": obj["Key"]} for obj in objetos]})
-    s3.delete_bucket(Bucket=nombre)
-
-if node:
-    ec2.terminate_instances(InstanceIds=[node["id"]])
-    time.sleep(2)  # Espera acotada para que el mock refleje la terminación.
-    ec2.delete_security_group(GroupId=node["security_group_id"])
-PY
-
-# 2. Borrar las colas del grupo (solo después de documentar la DLQ)
-python - <<'PY'
-import os
-from botocore.exceptions import ClientError
-from dotenv import load_dotenv
-load_dotenv()
-from fenix.config.settings import client
-
-sqs = client("sqs")
-prefijo = os.environ["QUEUE_PREFIX"]
-for nombre in (f"{prefijo}-events", f"{prefijo}-dlq"):
-    try:
-        url = sqs.get_queue_url(QueueName=nombre)["QueueUrl"]
-        sqs.delete_queue(QueueUrl=url)
-        print("eliminada:", nombre)
-    except ClientError as error:
-        print("no eliminada:", nombre, error.response.get("Error", {}).get("Code"))
-PY
-
-# 3. Detener LocalStack
-docker compose down
-```
-
-> Borrar únicamente IDs inventariados por el grupo. No eliminar recursos de otros grupos. No borrar `data/` mientras existan recursos; si se reinicia LocalStack desde cero, reconciliar el inventario antes de confiar en los IDs anteriores.
+El laboratorio no monta volúmenes de Docker: al quitar el contenedor se reinicia el estado de LocalStack. Los archivos locales `data/` y `logs/` permanecen en el proyecto. Si se vuelve a iniciar el laboratorio, ejecutar de nuevo `init-queues` y `setup-demo`; no borrar `data/` antes de reconciliar el inventario.
 
 ---
 
 ## 15. Video, defensa
 
 - **Vínculo al video grupal:** <!-- COMPLETAR: URL del video -->
-- **Marcas de tiempo por integrante:** <!-- COMPLETAR: 00:00 I1, ... 00:00 I6 -->
+- **Marcas de tiempo por integrante:** <!-- COMPLETAR: 00:00 I1, ... 00:00 I4 -->
 - **Reproducción por otra persona:** <!-- COMPLETAR: registrar quién clonó el repo, qué instrucciones hubo que corregir y el resultado -->
