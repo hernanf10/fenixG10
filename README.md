@@ -25,14 +25,12 @@ Qué demuestra:
 
 ## 2. Integrantes y roles
 
-| Rol | Apellido y nombre | Correo | Módulos | Pruebas defendidas |
+| Rol | Apellido y nombre | Correo | Tareas y módulos | Pruebas defendidas / responsabilidad |
 | --- | --- | --- | --- | --- |
-| I1 — Entradas y excepciones | <!-- COMPLETAR --> | <!-- COMPLETAR --> | `utils/errors.py`, `utils/validation.py`, `services/events.py` | F04, F05, F06, F07 |
-| I2 — Mensajería e inventario cloud | <!-- COMPLETAR --> | <!-- COMPLETAR --> | `services/sqs.py`, `services/demo.py`, `config/settings.py` (revisión) | F01, F08, F09, F10 |
-| I3 — Webhooks y reparación | <!-- COMPLETAR --> | <!-- COMPLETAR --> | `utils/crypto.py`, `services/receiver.py`, `remediation.repair` | F02, F03, F04, F05 |
-| I4 — Observabilidad y comunicación | <!-- COMPLETAR --> | <!-- COMPLETAR --> | `utils/logging_json.py`, `services/notifications.py` | F14, F16 |
-| I5 — Integración y worker | <!-- COMPLETAR --> | <!-- COMPLETAR --> | `services/worker.py`, `remediation.handle`, `cli.py` | F09, F11, F12, F15 |
-| I6 — Pruebas y diagnóstico | <!-- COMPLETAR --> | <!-- COMPLETAR --> | `tests/test_scenarios.py`, `demo.inject_fault` | F01–F16 |
+| I1 — Contratos, seguridad de entrada y webhook | Hernan Lamadrid | <!-- COMPLETAR --> | `utils/errors.py`, `utils/validation.py`, `services/events.py`, `utils/crypto.py`, `services/receiver.py` | F02–F07 |
+| I2 — Mensajería e inventario cloud | Lorenzo Lamas | <!-- COMPLETAR --> | `services/sqs.py`, configuración en `config/settings.py`, creación del laboratorio en `services/demo.py` | F01, F08, F10 |
+| I3 — Reparación, worker e integración | Maximiliano Ríos | <!-- COMPLETAR --> | `remediation.repair`, `remediation.handle`, `services/worker.py`, `services/notifications.py`, `utils/logging_json.py`, `cli.py` | F09, F11–F16 |
+| I4 — Pruebas y diagnóstico | Gabriel Avellaneda | <!-- COMPLETAR --> | `tests/test_scenarios.py`, diagnóstico de fallos y resultados, evidencias de ejecución, inyección controlada de fallas (`demo.inject_fault`) | Ejecución integral y diagnóstico de F01–F16, con apoyo de los responsables de cada módulo |
 
 ---
 
@@ -40,7 +38,7 @@ Qué demuestra:
 
 | Componente | Versión / requisito | Verificación |
 | --- | --- | --- |
-| Sistema operativo | GNU/Linux (probado en Debian 13); macOS/WSL con bash similar | `uname -a` |
+| Sistema operativo | GNU/Linux (probado en Debian 13); macOS/WSL con bash similar; Windows 11 (ver guía PowerShell en 4.4) | `uname -a` o `py --version` |
 | Python | 3.11 o superior (`pyproject.toml`: `requires-python = ">=3.11"`) | `python3 --version` |
 | Docker Engine | Con Compose v2 (`docker compose`, no `docker-compose`) | `docker compose version` |
 | LocalStack | Imagen fijada en `.env` (`LOCALSTACK_IMAGE=localstack/localstack:2026.10.0`) | `docker compose ps` (estado `healthy`) |
@@ -110,6 +108,155 @@ pytest -v -m "not integracion"
 # Pruebas de integración (requieren LocalStack + setup-demo)
 pytest -v -m integracion
 ```
+
+### 4.4 Instalación y ejecución en Windows 11 con PowerShell
+
+Estos pasos se ejecutan en PowerShell, desde la terminal integrada de **Visual Studio** (`View > Terminal`) o **Visual Studio Code** (`Terminal > New Terminal`, perfil PowerShell). El IDE se usa para editar y abrir la terminal; el proyecto no necesita una carga de trabajo de C++ ni compilarse desde Visual Studio.
+
+#### Instalar las herramientas necesarias
+
+1. Abrir PowerShell. Si `winget` está disponible, instalar Python 3.11, Git y Docker Desktop:
+
+   ```powershell
+   winget install --id Python.Python.3.11 --exact
+   winget install --id Git.Git --exact
+   winget install --id Docker.DockerDesktop --exact
+   ```
+
+   También se pueden instalar desde Microsoft Store o sus sitios oficiales. Si el instalador lo solicita, reiniciar Windows. Docker Desktop requiere WSL 2 y contenedores Linux; completar su configuración inicial y esperar a que indique que el motor está iniciado.
+
+2. Comprobar si WSL está instalado:
+
+   ```powershell
+   wsl --status
+   ```
+
+   Si todavía no está instalado, ejecutar PowerShell como administrador, instalarlo y reiniciar Windows:
+
+   ```powershell
+   wsl --install
+   ```
+
+   Después del reinicio, abrir una terminal nueva y ejecutar:
+
+   ```powershell
+   wsl --update
+   ```
+
+3. Cerrar y volver a abrir la terminal para actualizar el `PATH`, iniciar Docker Desktop y comprobar las instalaciones:
+
+   ```powershell
+   py -3.11 --version
+   git --version
+   docker compose version
+   docker info --format '{{.OSType}}'
+   ```
+
+   El último comando debe mostrar `linux`. Si `py`, `git` o `docker` no se reconocen, completar/reiniciar la instalación correspondiente y abrir una terminal nueva. Iniciar Docker Desktop antes de continuar.
+
+#### Obtener el proyecto
+
+Desde PowerShell, crear/abrir la carpeta donde se guardará el repositorio y clonarlo. Reemplazar el texto entre comillas por la URL real:
+
+```powershell
+New-Item -ItemType Directory -Force "$HOME\source" | Out-Null
+Set-Location "$HOME\source"
+git clone "URL_DEL_REPOSITORIO" fenixG10
+Set-Location .\fenixG10
+```
+
+Si ya se tiene el proyecto, abrir esa carpeta en Visual Studio/Visual Studio Code y ejecutar `Set-Location` hacia su raíz. En los pasos siguientes, la raíz debe ser `fenixG10`.
+
+#### Preparar el entorno
+
+1. Crear y activar un entorno virtual:
+
+   ```powershell
+   py -3.11 -m venv .venv
+   .\.venv\Scripts\Activate.ps1
+   ```
+
+   Si PowerShell bloquea el script de activación, permitir scripts solo en la terminal actual y volver a activarlo:
+
+   ```powershell
+   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+   .\.venv\Scripts\Activate.ps1
+   ```
+
+2. Instalar el proyecto y sus dependencias:
+
+   ```powershell
+   python -m pip install --upgrade pip
+   python -m pip install -e .
+   python -m pip install -r requirements.txt
+   ```
+
+3. Crear la configuración local y generar un secreto para el webhook:
+
+   ```powershell
+   if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+   python -c "import secrets; print(secrets.token_urlsafe(32))"
+   notepad .env
+   ```
+
+   Si `.env` ya existe, se conserva. Copiar el secreto generado en `WEBHOOK_SECRET=` y guardar el archivo. Si la imagen de LocalStack utilizada lo requiere, completar también `LOCALSTACK_AUTH_TOKEN`. No usar credenciales reales de AWS.
+
+4. Iniciar LocalStack y crear los recursos del laboratorio:
+
+   ```powershell
+   docker compose up -d
+   docker compose ps
+   Invoke-RestMethod -Uri http://localhost:4566/_localstack/health
+   python -m fenix.cli init-queues
+   python -m fenix.cli setup-demo
+   ```
+
+   Esperar a que Docker muestre el contenedor en ejecución y que el endpoint de salud responda antes de crear recursos. `init-queues` y `setup-demo` pueden ejecutarse nuevamente sin duplicarlos.
+
+#### Ejemplo de ejecución
+
+Usar tres terminales PowerShell integradas, todas abiertas en la raíz `fenixG10`, con el entorno virtual activado en cada una. Si se abre una terminal nueva:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+1. En la **Terminal 1**, iniciar el receptor:
+
+   ```powershell
+   python -m uvicorn fenix.services.receiver:app --host 127.0.0.1 --port 8000 --workers 1 --env-file .env
+   ```
+
+2. En la **Terminal 2**, iniciar el worker:
+
+   ```powershell
+   python -m fenix.cli worker
+   ```
+
+3. En la **Terminal 3**, provocar que la instancia mock quede detenida, generar un evento con timestamp UTC actual e ID único, y enviarlo:
+
+   ```powershell
+   python -m fenix.cli fault node-01
+
+   $event = [ordered]@{
+       schema_version = 1
+       event_id = "evt-node-$([guid]::NewGuid().ToString('N').Substring(0, 8))"
+       event_type = "instance.stopped"
+       resource_id = "node-01"
+       occurred_at = [DateTime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ")
+       simulate_failures = 0
+   }
+   $event | ConvertTo-Json -Compress | Set-Content -Path .\windows-node-event.json -Encoding Ascii
+
+   python -m fenix.cli send .\windows-node-event.json
+   Remove-Item .\windows-node-event.json
+   ```
+
+   La respuesta esperada del envío es `202`; el worker procesa el mensaje, repara la instancia y emite la notificación configurada (por defecto, a la consola). Al terminar, detener el receptor y el worker con `Ctrl+C`. Para detener LocalStack:
+
+   ```powershell
+   docker compose down
+   ```
 
 ---
 
