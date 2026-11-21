@@ -28,9 +28,9 @@ Qué demuestra:
 | Rol | Apellido y nombre | Correo | Tareas y módulos | Pruebas defendidas / responsabilidad |
 | --- | --- | --- | --- | --- |
 | I1 — Contratos, seguridad de entrada y webhook | Hernan Lamadrid | <!-- COMPLETAR --> | `utils/errors.py`, `utils/validation.py`, `services/events.py`, `utils/crypto.py`, `services/receiver.py` | F02–F07 |
-| I2 — Mensajería e inventario cloud | Lorenzo Lamas | <!-- COMPLETAR --> | `services/sqs.py`, configuración en `config/settings.py`, creación del laboratorio en `services/demo.py` | F01, F08, F10 |
+| I2 — Mensajería e inventario cloud | Gabriel Avellaneda | <!-- COMPLETAR --> | `services/sqs.py`, configuración en `config/settings.py`, creación del laboratorio en `services/demo.py` | F01, F08, F10 |
 | I3 — Reparación, worker e integración | Maximiliano Ríos | <!-- COMPLETAR --> | `remediation.repair`, `remediation.handle`, `services/worker.py`, `services/notifications.py`, `utils/logging_json.py`, `cli.py` | F09, F11–F16 |
-| I4 — Pruebas y diagnóstico | Gabriel Avellaneda | <!-- COMPLETAR --> | `tests/test_scenarios.py`, diagnóstico de fallos y resultados, evidencias de ejecución, inyección controlada de fallas (`demo.inject_fault`) | Ejecución integral y diagnóstico de F01–F16, con apoyo de los responsables de cada módulo |
+| I4 — Pruebas y diagnóstico | Lorenzo Lamas | <!-- COMPLETAR --> | `tests/test_scenarios.py`, diagnóstico de fallos y resultados, evidencias de ejecución, inyección controlada de fallas (`demo.inject_fault`) | Ejecución integral y diagnóstico de F01–F16, con apoyo de los responsables de cada módulo |
 
 ---
 
